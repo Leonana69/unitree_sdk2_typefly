@@ -37,7 +37,7 @@ enum test_mode
   stop_move = 99
 };
 
-const int TEST_MODE = trajectory_follow;
+const int TEST_MODE = stand_down;
 
 class Custom
 {
