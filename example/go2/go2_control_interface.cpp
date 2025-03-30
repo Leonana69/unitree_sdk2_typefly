@@ -129,9 +129,9 @@ public:
         return {ExecutionStatus::SUCCESS, ""};
     }
 
-    ExecutionResult rotate(double delta_angle, double timeout = 8.0) {
+    ExecutionResult rotate(double delta_rad, double timeout = 8.0) {
         double initial_yaw = state.imu_state().rpy()[2];
-        double yaw_target = initial_yaw + delta_angle * M_PI / 180.0;
+        double yaw_target = initial_yaw + delta_rad;
     
         double accumulated_angle = 0.0;
         auto now = std::chrono::system_clock::now();
@@ -155,7 +155,7 @@ public:
             prev_yaw = yaw_current;
     
             // Calculate remaining angle to rotate
-            double remaining_angle = delta_angle * M_PI / 180.0 - accumulated_angle;
+            double remaining_angle = delta_rad - accumulated_angle;
     
             if (fabs(remaining_angle) < control_error_yaw) {
                 std::cout << "Rotation completed successfully." << std::endl;
@@ -283,10 +283,10 @@ int main(int argc, char **argv) {
                 {"message", result.second}
             });
         } else if (command == "rotate") {
-            double delta_angle = body["delta_angle"].d();
+            double delta_rad = body["delta_rad"].d();
             double timeout = body["timeout"].d();
 
-            auto result = rc.rotate(delta_angle, timeout);
+            auto result = rc.rotate(delta_rad, timeout);
             return crow::response(200, crow::json::wvalue{
                 {"status", static_cast<int>(result.first)},
                 {"message", result.second}
