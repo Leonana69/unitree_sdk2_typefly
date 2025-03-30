@@ -122,7 +122,7 @@ public:
     }
 
     ExecutionResult stand_up() {
-        if (sport_client.StandUp() != 0) {
+        if (sport_client.RecoveryStand() != 0) {
             std::cerr << "Failed to send stand up command." << std::endl;
             return {ExecutionStatus::ERROR, "Failed to send stand up command."};
         }
