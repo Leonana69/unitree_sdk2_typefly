@@ -5,13 +5,23 @@
 
 #include <unitree/robot/go2/sport/sport_client.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
+#include <unitree/robot/channel/channel_publisher.hpp>
 #include <unitree/idl/go2/SportModeState_.hpp>
+#include <unitree/idl/go2/LowState_.hpp>
+#include <unitree/idl/go2/LowCmd_.hpp>
+#include <unitree/robot/go2/obstacles_avoid/obstacles_avoid_client.hpp>
 
 #include <crow.h>
 
 #define TOPIC_HIGHSTATE "rt/sportmodestate"
+#define TOPIC_LOWCMD "rt/lowcmd"
+#define TOPIC_LOWSTATE "rt/lowstate"
 
 using namespace unitree::common;
+using namespace unitree::robot;
+
+constexpr double PosStopF = (2.146E+9f);
+constexpr double VelStopF = (16000.0f);
 
 enum class ExecutionStatus {
     SUCCESS,
@@ -20,6 +30,39 @@ enum class ExecutionStatus {
 };
 
 using ExecutionResult = std::pair<ExecutionStatus, std::string>;
+
+/* Utils */
+uint32_t crc32_core(uint32_t* ptr, uint32_t len)
+{
+    unsigned int xbit = 0;
+    unsigned int data = 0;
+    unsigned int CRC32 = 0xFFFFFFFF;
+    const unsigned int dwPolynomial = 0x04c11db7;
+
+    for (unsigned int i = 0; i < len; i++)
+    {
+        xbit = 1 << 31;
+        data = ptr[i];
+        for (unsigned int bits = 0; bits < 32; bits++)
+        {
+            if (CRC32 & 0x80000000)
+            {
+                CRC32 <<= 1;
+                CRC32 ^= dwPolynomial;
+            }
+            else
+            {
+                CRC32 <<= 1;
+            }
+
+            if (data & xbit)
+                CRC32 ^= dwPolynomial;
+            xbit >>= 1;
+        }
+    }
+
+    return CRC32;
+}
 
 class PID {
 public:
@@ -96,6 +139,20 @@ private:
     float o_limit;
 };
 
+class Action {
+public:
+    float _startPos[12]; // initial gesture
+    float _endPos[12]; // target gesture
+    float duration; // s
+    
+    // Constructor to copy array values
+    Action(const float start[12], const float end[12], float dur) : duration(dur) {
+        std::copy(start, start + 12, _startPos);
+        std::copy(end, end + 12, _endPos);
+    }
+};
+
+/* Main class */
 class Go2RemoteControl {
 public:
     Go2RemoteControl() {
@@ -103,15 +160,92 @@ public:
         sport_client.Init();
 
         suber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_HIGHSTATE));
-        suber->InitChannel(std::bind(&Go2RemoteControl::HighStateHandler, this, std::placeholders::_1), 1);
+        suber->InitChannel(std::bind(&Go2RemoteControl::_HighStateHandler, this, std::placeholders::_1), 1);
+
+        /*create publisher*/
+        lowcmd_publisher.reset(new ChannelPublisher<unitree_go::msg::dds_::LowCmd_>(TOPIC_LOWCMD));
+        lowcmd_publisher->InitChannel();
+
+        /*create subscriber*/
+        lowstate_subscriber.reset(new ChannelSubscriber<unitree_go::msg::dds_::LowState_>(TOPIC_LOWSTATE));
+        lowstate_subscriber->InitChannel(std::bind(&Go2RemoteControl::_LowStateHandler, this, std::placeholders::_1), 1);
     };
 
-    void HighStateHandler(const void *message) {
-        state = *(unitree_go::msg::dds_::SportModeState_ *)message;
+    void _HighStateHandler(const void *message) {
+        high_state = *(unitree_go::msg::dds_::SportModeState_ *)message;
 
-        // std::cout << "Position: " << state.position()[0] << ", " << state.position()[1] << ", " << state.position()[2] << std::endl;
-        // std::cout << "IMU rpy: " << state.imu_state().rpy()[0] << ", " << state.imu_state().rpy()[1] << ", " << state.imu_state().rpy()[2] << std::endl;
+        // std::cout << "Position: " << high_state.position()[0] << ", " << high_state.position()[1] << ", " << high_state.position()[2] << std::endl;
+        // std::cout << "IMU rpy: " << high_state.imu_state().rpy()[0] << ", " << high_state.imu_state().rpy()[1] << ", " << high_state.imu_state().rpy()[2] << std::endl;
     };
+
+    void _LowStateHandler(const void *message) {
+        low_state = *(unitree_go::msg::dds_::LowState_ *)message;
+    };
+
+    void _InitLowCmd() {
+        low_cmd.head()[0] = 0xFE;
+        low_cmd.head()[1] = 0xEF;
+        low_cmd.level_flag() = 0xFF;
+        low_cmd.gpio() = 0;
+
+        for(int i=0; i<20; i++)
+        {
+            low_cmd.motor_cmd()[i].mode() = (0x01);   // motor switch to servo (PMSM) mode
+            low_cmd.motor_cmd()[i].q() = (PosStopF);
+            low_cmd.motor_cmd()[i].kp() = (0);
+            low_cmd.motor_cmd()[i].dq() = (VelStopF);
+            low_cmd.motor_cmd()[i].kd() = (0);
+            low_cmd.motor_cmd()[i].tau() = (0);
+        }
+    }
+
+    ExecutionResult LookUp(float duration = 4.0) {
+        _InitLowCmd();
+        float _startPos[12] = {0};
+        float _headUp[12] = {0.0, 0.67, -1.3, 0.0, 0.67, -1.3,
+            0.0, 0.67, -1.8, 0.0, 0.67, -1.8};
+        
+        for (int i = 0; i < 12; i++) {
+            _startPos[i] = low_state.motor_state()[i].q();
+        }
+
+        Action actions[3] = {
+            Action(_startPos, _headUp, 2.0f),
+            Action(_headUp, _headUp, 1.0f),
+            Action(_headUp, _startPos, 2.0f)
+        };
+
+        // Execute each action in the sequence
+        for (int i = 0; i < 3; i++) {
+            const Action& action = actions[i];
+            float duration = action.duration;
+            int steps = static_cast<int>(duration / dt); // Number of steps for interpolation
+
+            for (int step = 0; step <= steps; step++) {
+                float percent = static_cast<float>(step) / steps;
+
+                for (int j = 0; j < 12; j++) {
+                    // Interpolate between the start and end positions
+                    low_cmd.motor_cmd()[j].q() = (1 - percent) * action._startPos[j] + percent * action._endPos[j];
+                    low_cmd.motor_cmd()[j].dq() = 0;
+                    low_cmd.motor_cmd()[j].kp() = 60;
+                    low_cmd.motor_cmd()[j].kd() = 5;
+                    low_cmd.motor_cmd()[j].tau() = 0;
+                }
+
+                // Calculate and set the CRC for the command
+                low_cmd.crc() = crc32_core((uint32_t *)&low_cmd, (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
+
+                // Publish the command
+                lowcmd_publisher->Write(low_cmd);
+
+                // Sleep for the control step duration
+                usleep(static_cast<useconds_t>(dt * 1000000));
+            }
+        }
+
+        return {ExecutionStatus::SUCCESS, "LookUp action completed successfully."};
+    }
 
     ExecutionResult stand_down() {
         if (sport_client.StandDown() != 0) {
@@ -130,7 +264,7 @@ public:
     }
 
     ExecutionResult rotate(double delta_rad, double timeout = 8.0) {
-        double initial_yaw = state.imu_state().rpy()[2];
+        double initial_yaw = high_state.imu_state().rpy()[2];
         double yaw_target = initial_yaw + delta_rad;
     
         double accumulated_angle = 0.0;
@@ -141,7 +275,7 @@ public:
         while (now < end_time) {
             now = std::chrono::system_clock::now();
     
-            double yaw_current = state.imu_state().rpy()[2];
+            double yaw_current = high_state.imu_state().rpy()[2];
             double yaw_diff = yaw_current - prev_yaw;
     
             // Handle yaw wrap-around
@@ -173,9 +307,9 @@ public:
 
     ExecutionResult move(double dx, double dy, bool body_frame = true, double timeout = 1.0) {
         // World frame coordinates
-        double initial_x = state.position()[0];
-        double initial_y = state.position()[1];
-        double initial_yaw = state.imu_state().rpy()[2];
+        double initial_x = high_state.position()[0];
+        double initial_y = high_state.position()[1];
+        double initial_yaw = high_state.imu_state().rpy()[2];
         double yaw_target = initial_yaw;
     
         double target_x;
@@ -193,7 +327,7 @@ public:
             target_y = initial_y + dy;
         }
     
-        printf("Moving to target position: x: %.2f, y: %.2f\n", target_x, target_y);
+        // printf("Moving to target position: x: %.2f, y: %.2f\n", target_x, target_y);
     
         auto now = std::chrono::system_clock::now();
         auto end_time = now + std::chrono::duration<double>(timeout);
@@ -201,9 +335,9 @@ public:
         while (now < end_time) {
             now = std::chrono::system_clock::now();
     
-            double current_x = state.position()[0];
-            double current_y = state.position()[1];
-            double current_yaw = state.imu_state().rpy()[2];
+            double current_x = high_state.position()[0];
+            double current_y = high_state.position()[1];
+            double current_yaw = high_state.imu_state().rpy()[2];
     
             double remaining_x = target_x - current_x;
             double remaining_y = target_y - current_y;
@@ -224,8 +358,8 @@ public:
             // Compute yaw velocity
             double vyaw = pid_yaw.update(yaw_target - current_yaw);
     
-            printf("Current position: x: %.2f, y: %.2f, target position: x: %.2f, y: %.2f\n", current_x, current_y, target_x, target_y);
-            printf("Body frame velocities: vx: %.2f, vy: %.2f, vyaw: %.2f\n", v_body_x, v_body_y, vyaw);
+            // printf("Current position: x: %.2f, y: %.2f, target position: x: %.2f, y: %.2f\n", current_x, current_y, target_x, target_y);
+            // printf("Body frame velocities: vx: %.2f, vy: %.2f, vyaw: %.2f\n", v_body_x, v_body_y, vyaw);
     
             // Send body-frame velocities to the robot
             sport_client.Move(v_body_x, v_body_y, vyaw);
@@ -236,9 +370,17 @@ public:
         return {ExecutionStatus::TIMEOUT, "Movement timed out before reaching the target position."};
     }
 
-    unitree_go::msg::dds_::SportModeState_ state;
+    unitree_go::msg::dds_::SportModeState_ high_state{}; // default init
     unitree::robot::go2::SportClient sport_client;
     unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> suber;
+
+    unitree_go::msg::dds_::LowCmd_ low_cmd{};      // default init
+    unitree_go::msg::dds_::LowState_ low_state{};  // default init
+
+    /*publisher*/
+    ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> lowcmd_publisher;
+    /*subscriber*/
+    ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> lowstate_subscriber;
 
     PID pid_yaw{10.0, 0.0, 0.0, 100.0, 10.0, 0.5, 2.0}; // PID controller for yaw
     PID pid_x{2, 0.0, 0.0, 100.0, 10.0, 0.5, 1.0}; // PID controller for x-axis
@@ -299,6 +441,12 @@ int main(int argc, char **argv) {
             });
         } else if (command == "stand_down") {
             auto result = rc.stand_down();
+            return crow::response(200, crow::json::wvalue{
+                {"status", static_cast<int>(result.first)},
+                {"message", result.second}
+            });
+        } else if (command == "look_up") {
+            auto result = rc.LookUp();
             return crow::response(200, crow::json::wvalue{
                 {"status", static_cast<int>(result.first)},
                 {"message", result.second}
