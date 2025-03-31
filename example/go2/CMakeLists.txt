@@ -22,3 +22,6 @@
 
 add_executable(go2_control_interface go2_control_interface.cpp)
 target_link_libraries(go2_control_interface unitree_sdk2)
+
+add_executable(go2_obstacles_avoid go2_obstacles_avoid.cpp)
+target_link_libraries(go2_obstacles_avoid unitree_sdk2)

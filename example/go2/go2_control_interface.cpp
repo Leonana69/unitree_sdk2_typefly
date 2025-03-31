@@ -6,6 +6,7 @@
 #include <unitree/robot/go2/sport/sport_client.hpp>
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/robot/channel/channel_publisher.hpp>
+#include <unitree/robot/b2/motion_switcher/motion_switcher_client.hpp>
 #include <unitree/idl/go2/SportModeState_.hpp>
 #include <unitree/idl/go2/LowState_.hpp>
 #include <unitree/idl/go2/LowCmd_.hpp>
@@ -14,8 +15,6 @@
 #include <crow.h>
 
 #define TOPIC_HIGHSTATE "rt/sportmodestate"
-#define TOPIC_LOWCMD "rt/lowcmd"
-#define TOPIC_LOWSTATE "rt/lowstate"
 
 using namespace unitree::common;
 using namespace unitree::robot;
@@ -161,14 +160,6 @@ public:
 
         suber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_HIGHSTATE));
         suber->InitChannel(std::bind(&Go2RemoteControl::_HighStateHandler, this, std::placeholders::_1), 1);
-
-        /*create publisher*/
-        lowcmd_publisher.reset(new ChannelPublisher<unitree_go::msg::dds_::LowCmd_>(TOPIC_LOWCMD));
-        lowcmd_publisher->InitChannel();
-
-        /*create subscriber*/
-        lowstate_subscriber.reset(new ChannelSubscriber<unitree_go::msg::dds_::LowState_>(TOPIC_LOWSTATE));
-        lowstate_subscriber->InitChannel(std::bind(&Go2RemoteControl::_LowStateHandler, this, std::placeholders::_1), 1);
     };
 
     void _HighStateHandler(const void *message) {
@@ -178,73 +169,12 @@ public:
         // std::cout << "IMU rpy: " << high_state.imu_state().rpy()[0] << ", " << high_state.imu_state().rpy()[1] << ", " << high_state.imu_state().rpy()[2] << std::endl;
     };
 
-    void _LowStateHandler(const void *message) {
-        low_state = *(unitree_go::msg::dds_::LowState_ *)message;
-    };
-
-    void _InitLowCmd() {
-        low_cmd.head()[0] = 0xFE;
-        low_cmd.head()[1] = 0xEF;
-        low_cmd.level_flag() = 0xFF;
-        low_cmd.gpio() = 0;
-
-        for(int i=0; i<20; i++)
-        {
-            low_cmd.motor_cmd()[i].mode() = (0x01);   // motor switch to servo (PMSM) mode
-            low_cmd.motor_cmd()[i].q() = (PosStopF);
-            low_cmd.motor_cmd()[i].kp() = (0);
-            low_cmd.motor_cmd()[i].dq() = (VelStopF);
-            low_cmd.motor_cmd()[i].kd() = (0);
-            low_cmd.motor_cmd()[i].tau() = (0);
+    ExecutionResult look(float angle_rad) {
+        if (sport_client.Euler(0, angle_rad, 0) != 0) {
+            std::cerr << "Failed to send look command." << std::endl;
+            return {ExecutionStatus::ERROR, "Failed to send look command."};
         }
-    }
-
-    ExecutionResult LookUp(float duration = 4.0) {
-        _InitLowCmd();
-        float _startPos[12] = {0};
-        float _headUp[12] = {0.0, 0.67, -1.3, 0.0, 0.67, -1.3,
-            0.0, 0.67, -1.8, 0.0, 0.67, -1.8};
-        
-        for (int i = 0; i < 12; i++) {
-            _startPos[i] = low_state.motor_state()[i].q();
-        }
-
-        Action actions[3] = {
-            Action(_startPos, _headUp, 2.0f),
-            Action(_headUp, _headUp, 1.0f),
-            Action(_headUp, _startPos, 2.0f)
-        };
-
-        // Execute each action in the sequence
-        for (int i = 0; i < 3; i++) {
-            const Action& action = actions[i];
-            float duration = action.duration;
-            int steps = static_cast<int>(duration / dt); // Number of steps for interpolation
-
-            for (int step = 0; step <= steps; step++) {
-                float percent = static_cast<float>(step) / steps;
-
-                for (int j = 0; j < 12; j++) {
-                    // Interpolate between the start and end positions
-                    low_cmd.motor_cmd()[j].q() = (1 - percent) * action._startPos[j] + percent * action._endPos[j];
-                    low_cmd.motor_cmd()[j].dq() = 0;
-                    low_cmd.motor_cmd()[j].kp() = 60;
-                    low_cmd.motor_cmd()[j].kd() = 5;
-                    low_cmd.motor_cmd()[j].tau() = 0;
-                }
-
-                // Calculate and set the CRC for the command
-                low_cmd.crc() = crc32_core((uint32_t *)&low_cmd, (sizeof(unitree_go::msg::dds_::LowCmd_) >> 2) - 1);
-
-                // Publish the command
-                lowcmd_publisher->Write(low_cmd);
-
-                // Sleep for the control step duration
-                usleep(static_cast<useconds_t>(dt * 1000000));
-            }
-        }
-
-        return {ExecutionStatus::SUCCESS, "LookUp action completed successfully."};
+        return {ExecutionStatus::SUCCESS, "Look action completed successfully."};
     }
 
     ExecutionResult stand_down() {
@@ -377,6 +307,7 @@ public:
     unitree_go::msg::dds_::LowCmd_ low_cmd{};      // default init
     unitree_go::msg::dds_::LowState_ low_state{};  // default init
 
+    unitree::robot::b2::MotionSwitcherClient msc;
     /*publisher*/
     ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> lowcmd_publisher;
     /*subscriber*/
@@ -445,8 +376,9 @@ int main(int argc, char **argv) {
                 {"status", static_cast<int>(result.first)},
                 {"message", result.second}
             });
-        } else if (command == "look_up") {
-            auto result = rc.LookUp();
+        } else if (command == "look") {
+            double angle_rad = body["angle_rad"].d();
+            auto result = rc.look(angle_rad);
             return crow::response(200, crow::json::wvalue{
                 {"status", static_cast<int>(result.first)},
                 {"message", result.second}

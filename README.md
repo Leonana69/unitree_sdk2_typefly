@@ -43,3 +43,34 @@ Note that if you install the library to other places other than `/opt/unitree_ro
 
 ### Notice
 For more reference information, please go to [Unitree Document Center](https://support.unitree.com/home/zh/developer).
+
+
+## Support for D435i Stream
+On the Go2, install these libraries:
+```
+apt install libudev-dev libusb-1.0-0-dev cmake
+```
+Clone the realsense lib:
+```
+git clone https://github.com/IntelRealSense/librealsense.git
+cd librealsense
+# select a version
+git checkout v2.56.3
+```
+
+Make a minimum build:
+```
+mkdir build && cd build
+
+cmake .. \
+  -DBUILD_EXAMPLES=OFF \
+  -DBUILD_GRAPHICAL_EXAMPLES=OFF \
+  -DBUILD_TOOLS=OFF \
+  -DBUILD_UNIT_TESTS=OFF \
+  -DFORCE_RSUSB_BACKEND=ON \
+  -DBUILD_WITH_CUDA=OFF \
+  -DBUILD_WITH_OPENMP=OFF \
+  -DCMAKE_BUILD_TYPE=Release
+
+make && make install
+```
