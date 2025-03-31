@@ -10,7 +10,6 @@
 #include <unitree/idl/go2/SportModeState_.hpp>
 #include <unitree/idl/go2/LowState_.hpp>
 #include <unitree/idl/go2/LowCmd_.hpp>
-#include <unitree/robot/go2/obstacles_avoid/obstacles_avoid_client.hpp>
 
 #include <crow.h>
 
@@ -160,6 +159,21 @@ public:
 
         suber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_HIGHSTATE));
         suber->InitChannel(std::bind(&Go2RemoteControl::_HighStateHandler, this, std::placeholders::_1), 1);
+
+        msc.SetTimeout(10.0f); 
+        msc.Init();
+
+        uint32_t ret = msc.SelectMode("normal");
+        std::string form, name;
+        msc.CheckMode(form, name);
+        if (ret == 0) {
+            std::cout << "SelectMode succeeded." << std::endl;
+        } else {
+            std::cout << "SelectMode failed. Error code: " << ret << std::endl;
+        }
+        std::cout << "Current mode: " << name << std::endl;
+
+        // sport_client.FreeAvoid(true);
     };
 
     void _HighStateHandler(const void *message) {
@@ -174,7 +188,7 @@ public:
             std::cerr << "Failed to send look command." << std::endl;
             return {ExecutionStatus::ERROR, "Failed to send look command."};
         }
-        return {ExecutionStatus::SUCCESS, "Look action completed successfully."};
+        return {ExecutionStatus::SUCCESS, ""};
     }
 
     ExecutionResult stand_down() {
@@ -222,7 +236,7 @@ public:
             double remaining_angle = delta_rad - accumulated_angle;
     
             if (fabs(remaining_angle) < control_error_yaw) {
-                std::cout << "Rotation completed successfully." << std::endl;
+                // std::cout << "Rotation completed successfully." << std::endl;
                 return {ExecutionStatus::SUCCESS, ""};
             }
     
