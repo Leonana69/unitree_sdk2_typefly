@@ -23,5 +23,13 @@
 add_executable(go2_control_interface go2_control_interface.cpp)
 target_link_libraries(go2_control_interface unitree_sdk2)
 
-add_executable(go2_obstacles_avoid go2_obstacles_avoid.cpp)
-target_link_libraries(go2_obstacles_avoid unitree_sdk2)
+add_executable(go2_livox go2_livox.cpp)
+
+# Include Livox SDK headers
+target_include_directories(go2_livox PRIVATE /usr/local/include)
+
+# Link against Livox SDK shared library and the Unitree SDK
+target_link_libraries(go2_livox 
+    unitree_sdk2 
+    /usr/local/lib/liblivox_lidar_sdk_shared.so
+)

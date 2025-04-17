@@ -402,6 +402,20 @@ int main(int argc, char **argv) {
         }
     });
 
+    CROW_ROUTE(app, "/state").methods(crow::HTTPMethod::GET)([&rc]() {
+        auto position = rc.high_state.position();
+        auto rpy = rc.high_state.imu_state().rpy();
+    
+        return crow::response(200, crow::json::wvalue{
+            {"x", position[0]},
+            {"y", position[1]},
+            {"z", position[2]},
+            {"roll", rpy[0]},
+            {"pitch", rpy[1]},
+            {"yaw", rpy[2]}
+        });
+    });
+
     app.port(18080).multithreaded().run();
     
     return 0;
