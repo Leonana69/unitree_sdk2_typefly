@@ -35,7 +35,7 @@ void InitUDPSender(const char* ip, uint16_t port) {
     inet_pton(AF_INET, ip, &target_addr.sin_addr);
 }
 
-std::vector<float> point_buffer;
+std::vector<int16_t> point_buffer;
 std::mutex buffer_mutex;
 
 void StartLidarSender() {
@@ -43,16 +43,16 @@ void StartLidarSender() {
         using namespace std::chrono;
         while (true) {
             auto start = steady_clock::now();
-            std::vector<float> to_send;
+            std::vector<int16_t> to_send;
             {
                 std::lock_guard<std::mutex> lock(buffer_mutex);
                 to_send.swap(point_buffer);
             }
 
             if (!to_send.empty()) {
-                std::vector<uint8_t> packet(1 + to_send.size() * sizeof(float));
+                std::vector<uint8_t> packet(1 + to_send.size() * sizeof(int16_t));
                 packet[0] = MSG_POINTCLOUD;
-                memcpy(&packet[1], to_send.data(), to_send.size() * sizeof(float));
+                memcpy(&packet[1], to_send.data(), to_send.size() * sizeof(int16_t));
                 sendto(udp_socket, packet.data(), packet.size(), 0, (sockaddr*)&target_addr, sizeof(target_addr));
             }
 
@@ -66,14 +66,14 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
 
     LivoxLidarCartesianHighRawPoint* pts = (LivoxLidarCartesianHighRawPoint*)data->data;
 
-    std::vector<float> xyz;
+    std::vector<int16_t> xyz;
     xyz.reserve(data->dot_num * 3);
     for (uint32_t i = 0; i < data->dot_num; ++i) {
-        float x = static_cast<float>(pts[i].x) / 1000.0f;
-        float y = static_cast<float>(pts[i].y) / 1000.0f;
-        float z = static_cast<float>(pts[i].z) / 1000.0f;
+        int16_t x = static_cast<int16_t>(pts[i].x);
+        int16_t y = static_cast<int16_t>(pts[i].y);
+        int16_t z = static_cast<int16_t>(pts[i].z);
         // Only keep points close to the horizontal plane
-        if (z > -0.10f && z < 0.10f) {
+        if (z > -100 && z < 100) {
             xyz.push_back(x);
             xyz.push_back(y);
             xyz.push_back(z);
