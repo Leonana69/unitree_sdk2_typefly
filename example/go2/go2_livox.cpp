@@ -10,6 +10,8 @@
 #include <chrono>
 #include <iostream>
 #include <vector>
+#include <chrono>
+#include <mutex>
 
 #include <unitree/robot/channel/channel_subscriber.hpp>
 #include <unitree/idl/go2/SportModeState_.hpp>
@@ -33,41 +35,60 @@ void InitUDPSender(const char* ip, uint16_t port) {
     inet_pton(AF_INET, ip, &target_addr.sin_addr);
 }
 
-void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEthernetPacket* data, void* client_data) {
-    if (data == nullptr) {
-        return;
-    }
+std::vector<float> point_buffer;
+std::mutex buffer_mutex;
 
-    if (data->data_type == kLivoxLidarCartesianCoordinateHighData) {
-        LivoxLidarCartesianHighRawPoint* pts = (LivoxLidarCartesianHighRawPoint*)data->data;
-
-        std::vector<float> xyz;
-        xyz.reserve(data->dot_num * 3);
-        for (uint32_t i = 0; i < data->dot_num; ++i) {
-            float x = static_cast<float>(pts[i].x) / 1000.0f;
-            float y = static_cast<float>(pts[i].y) / 1000.0f;
-            float z = static_cast<float>(pts[i].z) / 1000.0f;
-            // Only keep points close to the horizontal plane
-            if (z > -0.10f && z < 0.10f) {
-                xyz.push_back(x);
-                xyz.push_back(y);
-                xyz.push_back(z);
+void StartLidarSender() {
+    std::thread([] {
+        using namespace std::chrono;
+        while (true) {
+            auto start = steady_clock::now();
+            std::vector<float> to_send;
+            {
+                std::lock_guard<std::mutex> lock(buffer_mutex);
+                to_send.swap(point_buffer);
             }
-        }
 
-        if (xyz.empty()) return;
-        
-        std::vector<uint8_t> buffer(sizeof(MessageType) + xyz.size() * sizeof(float));
-        buffer[0] = MSG_POINTCLOUD;
-        memcpy(buffer.data() + 1, xyz.data(), xyz.size() * sizeof(float));
-        sendto(udp_socket, buffer.data(), buffer.size(), 0, (sockaddr*)&target_addr, sizeof(target_addr));
-        // sendto(udp_socket, xyz.data(), xyz.size() * sizeof(float), 0, (sockaddr*)&target_addr, sizeof(target_addr));
+            if (!to_send.empty()) {
+                std::vector<uint8_t> packet(1 + to_send.size() * sizeof(float));
+                packet[0] = MSG_POINTCLOUD;
+                memcpy(&packet[1], to_send.data(), to_send.size() * sizeof(float));
+                sendto(udp_socket, packet.data(), packet.size(), 0, (sockaddr*)&target_addr, sizeof(target_addr));
+            }
+
+            std::this_thread::sleep_until(start + 33ms);  // ~30Hz
+        }
+    }).detach();
+}
+
+void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEthernetPacket* data, void* client_data) {
+    if (!data || data->data_type != kLivoxLidarCartesianCoordinateHighData) return;
+
+    LivoxLidarCartesianHighRawPoint* pts = (LivoxLidarCartesianHighRawPoint*)data->data;
+
+    std::vector<float> xyz;
+    xyz.reserve(data->dot_num * 3);
+    for (uint32_t i = 0; i < data->dot_num; ++i) {
+        float x = static_cast<float>(pts[i].x) / 1000.0f;
+        float y = static_cast<float>(pts[i].y) / 1000.0f;
+        float z = static_cast<float>(pts[i].z) / 1000.0f;
+        // Only keep points close to the horizontal plane
+        if (z > -0.10f && z < 0.10f) {
+            xyz.push_back(x);
+            xyz.push_back(y);
+            xyz.push_back(z);
+        }
     }
-    else if (data->data_type == kLivoxLidarCartesianCoordinateLowData) {
-        LivoxLidarCartesianLowRawPoint *p_point_data = (LivoxLidarCartesianLowRawPoint *)data->data;
-    } else if (data->data_type == kLivoxLidarSphericalCoordinateData) {
-        LivoxLidarSpherPoint* p_point_data = (LivoxLidarSpherPoint *)data->data;
+
+    if (!xyz.empty()) {
+        std::lock_guard<std::mutex> lock(buffer_mutex);
+        point_buffer.insert(point_buffer.end(), xyz.begin(), xyz.end());
     }
+    
+    // std::vector<uint8_t> buffer(sizeof(MessageType) + xyz.size() * sizeof(float));
+    // buffer[0] = MSG_POINTCLOUD;
+    // memcpy(buffer.data() + 1, xyz.data(), xyz.size() * sizeof(float));
+    // sendto(udp_socket, buffer.data(), buffer.size(), 0, (sockaddr*)&target_addr, sizeof(target_addr));
 }
 
 void QueryInternalInfoCallback(livox_status status, uint32_t handle, 
@@ -120,7 +141,6 @@ void WorkModeCallback(livox_status status, uint32_t handle,LivoxLidarAsyncContro
     }
     printf("WorkModeCallack, status:%u, handle:%u, ret_code:%u, error_key:%u",
         status, handle, response->ret_code, response->error_key);
-
 }
 
 void LidarInfoChangeCallback(const uint32_t handle, const LivoxLidarInfo* info, void* client_data) {
@@ -143,6 +163,14 @@ void LidarInfoChangeCallback(const uint32_t handle, const LivoxLidarInfo* info, 
 }
 
 void _HighStateHandler(const void *message) {
+    using namespace std::chrono;
+    static auto last_send_time = steady_clock::now();
+    auto now = steady_clock::now();
+    if (duration_cast<milliseconds>(now - last_send_time).count() < 20) {
+        return;  // Skip if less than 10ms since last send
+    }
+    last_send_time = now;
+
     unitree_go::msg::dds_::SportModeState_ high_state{}; // default init
     high_state = *(unitree_go::msg::dds_::SportModeState_ *)message;
 
@@ -158,7 +186,7 @@ void _HighStateHandler(const void *message) {
     // printf("Position: %f, %f, %f\n", data[0], data[1], data[2]);
     // printf("IMU quaternion: %f, %f, %f, %f\n", data[3], data[4], data[5], data[6]);
 
-    sendto(udp_socket, data, sizeof(data), 0, (sockaddr*)&target_addr, sizeof(target_addr));
+    // sendto(udp_socket, data, sizeof(data), 0, (sockaddr*)&target_addr, sizeof(target_addr));
     uint8_t buffer[1 + sizeof(data)];
     buffer[0] = MSG_HIGHSTATE;
     memcpy(buffer + 1, data, sizeof(data));
@@ -201,6 +229,8 @@ int main(int argc, const char *argv[]) {
     
     // // REQUIRED, to get a handle to targeted lidar and set its work mode to NORMAL
     SetLivoxLidarInfoChangeCallback(LidarInfoChangeCallback, nullptr);
+
+    StartLidarSender();
 
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
