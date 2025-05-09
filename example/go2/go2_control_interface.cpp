@@ -315,7 +315,10 @@ public:
     }
 
     ExecutionResult nav(double vx, double vy, double vyaw) {
-        sport_client.Move(vx, vy, vyaw);
+        int rslt = sport_client.Move(vx, vy, vyaw);
+        if (rslt != 0) {
+            return {ExecutionStatus::ERROR, "Move failed with error code: " + std::to_string(rslt)};
+        }
         return {ExecutionStatus::SUCCESS, ""};
     }
 
