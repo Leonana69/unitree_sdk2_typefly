@@ -368,26 +368,26 @@ int main(int argc, char **argv) {
         std::string command = body["command"].s();
     
         // Map of commands to handler lambdas
-        static const std::unordered_map<std::string, std::function<ExecutionResult()>> command_map = {
-            {"move", [&]() {
+        const std::unordered_map<std::string, std::function<ExecutionResult()>> command_map = {
+            {"move", [body, &rc]() {
                 double dx = body["dx"].d();
                 double dy = body["dy"].d();
                 bool body_frame = body["body_frame"].b();
                 double timeout = body["timeout"].d();
                 return rc.move(dx, dy, body_frame, timeout);
             }},
-            {"rotate", [&]() {
+            {"rotate", [body, &rc]() {
                 double delta_rad = body["delta_rad"].d();
                 double timeout = body["timeout"].d();
                 return rc.rotate(delta_rad, timeout);
             }},
-            {"stand_up", [&]() { return rc.stand_up(); }},
-            {"stand_down", [&]() { return rc.stand_down(); }},
-            {"look", [&]() {
+            {"stand_up", [body, &rc]() { return rc.stand_up(); }},
+            {"stand_down", [body, &rc]() { return rc.stand_down(); }},
+            {"look", [body, &rc]() {
                 double angle_rad = body["angle_rad"].d();
                 return rc.look(angle_rad);
             }},
-            {"nav", [&]() {
+            {"nav", [body, &rc]() {
                 double vx = body["vx"].d();
                 double vy = body["vy"].d();
                 double vyaw = body["vyaw"].d();
@@ -397,6 +397,7 @@ int main(int argc, char **argv) {
     
         // Execute the corresponding handler
         auto it = command_map.find(command);
+
         if (it != command_map.end()) {
             auto result = it->second();
             return crow::response(200, crow::json::wvalue{
