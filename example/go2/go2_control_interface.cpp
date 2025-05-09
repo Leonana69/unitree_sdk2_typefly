@@ -314,6 +314,11 @@ public:
         return {ExecutionStatus::TIMEOUT, "Movement timed out before reaching the target position."};
     }
 
+    ExecutionResult nav(double vx, double vy, double vyaw) {
+        sport_client.Move(vx, vy, vyaw);
+        return {ExecutionStatus::SUCCESS, ""};
+    }
+
     unitree_go::msg::dds_::SportModeState_ high_state{}; // default init
     unitree::robot::go2::SportClient sport_client;
     unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> suber;
@@ -356,50 +361,48 @@ int main(int argc, char **argv) {
         if (!body) {
             return crow::response(400, "Invalid JSON");
         }
-
+    
         std::string command = body["command"].s();
-        if (command == "move") {
-            double dx = body["dx"].d();
-            double dy = body["dy"].d();
-            bool body_frame = body["body_frame"].b();
-            double timeout = body["timeout"].d();
-
-            auto result = rc.move(dx, dy, body_frame, timeout);
+    
+        // Map of commands to handler lambdas
+        static const std::unordered_map<std::string, std::function<ExecutionResult()>> command_map = {
+            {"move", [&]() {
+                double dx = body["dx"].d();
+                double dy = body["dy"].d();
+                bool body_frame = body["body_frame"].b();
+                double timeout = body["timeout"].d();
+                return rc.move(dx, dy, body_frame, timeout);
+            }},
+            {"rotate", [&]() {
+                double delta_rad = body["delta_rad"].d();
+                double timeout = body["timeout"].d();
+                return rc.rotate(delta_rad, timeout);
+            }},
+            {"stand_up", [&]() { return rc.stand_up(); }},
+            {"stand_down", [&]() { return rc.stand_down(); }},
+            {"look", [&]() {
+                double angle_rad = body["angle_rad"].d();
+                return rc.look(angle_rad);
+            }},
+            {"nav", [&]() {
+                double vx = body["vx"].d();
+                double vy = body["vy"].d();
+                double vyaw = body["vyaw"].d();
+                return rc.nav(vx, vy, vyaw);
+            }}
+        };
+    
+        // Execute the corresponding handler
+        auto it = command_map.find(command);
+        if (it != command_map.end()) {
+            auto result = it->second();
             return crow::response(200, crow::json::wvalue{
                 {"status", static_cast<int>(result.first)},
                 {"message", result.second}
             });
-        } else if (command == "rotate") {
-            double delta_rad = body["delta_rad"].d();
-            double timeout = body["timeout"].d();
-
-            auto result = rc.rotate(delta_rad, timeout);
-            return crow::response(200, crow::json::wvalue{
-                {"status", static_cast<int>(result.first)},
-                {"message", result.second}
-            });
-        } else if (command == "stand_up") {
-            auto result = rc.stand_up();
-            return crow::response(200, crow::json::wvalue{
-                {"status", static_cast<int>(result.first)},
-                {"message", result.second}
-            });
-        } else if (command == "stand_down") {
-            auto result = rc.stand_down();
-            return crow::response(200, crow::json::wvalue{
-                {"status", static_cast<int>(result.first)},
-                {"message", result.second}
-            });
-        } else if (command == "look") {
-            double angle_rad = body["angle_rad"].d();
-            auto result = rc.look(angle_rad);
-            return crow::response(200, crow::json::wvalue{
-                {"status", static_cast<int>(result.first)},
-                {"message", result.second}
-            });
-        } else {
-            return crow::response(400, "Unknown command");
         }
+    
+        return crow::response(400, "Unknown command");
     });
 
     CROW_ROUTE(app, "/state").methods(crow::HTTPMethod::GET)([&rc]() {
