@@ -249,6 +249,14 @@ public:
         return {ExecutionStatus::TIMEOUT, "Rotation timed out before reaching the target angle."};
     }
 
+    ExecutionResult euler(float roll, float pitch, float yaw) {
+        if (sport_client.Euler(roll, pitch, yaw) != 0) {
+            std::cerr << "Failed to send Euler command." << std::endl;
+            return {ExecutionStatus::ERROR, "Failed to send Euler command."};
+        }
+        return {ExecutionStatus::SUCCESS, ""};
+    }
+
     ExecutionResult move(double dx, double dy, bool body_frame = true, double timeout = 1.0) {
         // World frame coordinates
         double initial_x = high_state.position()[0];
@@ -392,6 +400,12 @@ int main(int argc, char **argv) {
                 double vy = body["vy"].d();
                 double vyaw = body["vyaw"].d();
                 return rc.nav(vx, vy, vyaw);
+            }},
+            {"euler", [body, &rc]() {
+                float roll = body["roll"].d();
+                float pitch = body["pitch"].d();
+                float yaw = body["yaw"].d();
+                return rc.euler(roll, pitch, yaw);
             }}
         };
     

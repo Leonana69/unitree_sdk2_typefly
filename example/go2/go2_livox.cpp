@@ -24,15 +24,50 @@ enum MessageType : uint8_t {
     MSG_HIGHSTATE  = 2
 };
 
-int udp_socket;
-sockaddr_in target_addr;
+int tcp_server_socket;
+std::set<int> tcp_clients;
+std::mutex tcp_clients_mutex;
 
-void InitUDPSender(const char* ip, uint16_t port) {
-    udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    memset(&target_addr, 0, sizeof(target_addr));
-    target_addr.sin_family = AF_INET;
-    target_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &target_addr.sin_addr);
+void InitTCPServer(uint16_t port) {
+    tcp_server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    int opt = 1;
+    setsockopt(tcp_server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    sockaddr_in server_addr{};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(port);
+    bind(tcp_server_socket, (sockaddr*)&server_addr, sizeof(server_addr));
+    listen(tcp_server_socket, 5);
+
+    // Set non-blocking
+    fcntl(tcp_server_socket, F_SETFL, O_NONBLOCK);
+}
+
+// Call this periodically in your main loop
+void AcceptTCPClients() {
+    sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    int client_fd;
+    while ((client_fd = accept(tcp_server_socket, (sockaddr*)&client_addr, &client_len)) >= 0) {
+        std::lock_guard<std::mutex> lock(tcp_clients_mutex);
+        tcp_clients.insert(client_fd);
+        printf("New TCP client connected: %d\n", client_fd);
+    }
+}
+
+// Send data to all connected clients
+void SendToAllClients(const void* data, size_t len) {
+    std::lock_guard<std::mutex> lock(tcp_clients_mutex);
+    for (auto it = tcp_clients.begin(); it != tcp_clients.end(); ) {
+        ssize_t sent = send(*it, data, len, MSG_NOSIGNAL);
+        if (sent < 0) {
+            // Remove disconnected client
+            close(*it);
+            it = tcp_clients.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEthernetPacket* data, void* client_data) {
@@ -52,7 +87,7 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
         int16_t z = (int16_t)(pts[i].z);
         if (z > -100 && z < 100) {
             if (offset + 6 > MAX_UDP_PAYLOAD) {
-                sendto(udp_socket, packet, offset, 0, (sockaddr*)&target_addr, sizeof(target_addr));
+                SendToAllClients(packet, offset);
                 seq_id++;
                 offset = 1 + sizeof(seq_id);
                 memcpy(&packet[1], &seq_id, sizeof(seq_id));
@@ -65,7 +100,7 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
     }
 
     if (offset > 1 + sizeof(seq_id)) {
-        sendto(udp_socket, packet, offset, 0, (sockaddr*)&target_addr, sizeof(target_addr));
+        SendToAllClients(packet, offset);
         seq_id++;
     }
 }
@@ -94,13 +129,13 @@ void QueryInternalInfoCallback(livox_status status, uint32_t handle,
     for (uint8_t i = 0; i < response->param_num; ++i) {
         LivoxLidarKeyValueParam* kv = (LivoxLidarKeyValueParam*)&response->data[off];
         if (kv->key == kKeyLidarPointDataHostIpCfg) {
-        memcpy(host_point_ipaddr, &(kv->value[0]), sizeof(uint8_t) * 4);
-        memcpy(&(host_point_port), &(kv->value[4]), sizeof(uint16_t));
-        memcpy(&(lidar_point_port), &(kv->value[6]), sizeof(uint16_t));
+            memcpy(host_point_ipaddr, &(kv->value[0]), sizeof(uint8_t) * 4);
+            memcpy(&(host_point_port), &(kv->value[4]), sizeof(uint16_t));
+            memcpy(&(lidar_point_port), &(kv->value[6]), sizeof(uint16_t));
         } else if (kv->key == kKeyLidarImuHostIpCfg) {
-        memcpy(host_imu_ipaddr, &(kv->value[0]), sizeof(uint8_t) * 4);
-        memcpy(&(host_imu_data_port), &(kv->value[4]), sizeof(uint16_t));
-        memcpy(&(lidar_imu_data_port), &(kv->value[6]), sizeof(uint16_t));
+            memcpy(host_imu_ipaddr, &(kv->value[0]), sizeof(uint8_t) * 4);
+            memcpy(&(host_imu_data_port), &(kv->value[4]), sizeof(uint16_t));
+            memcpy(&(lidar_imu_data_port), &(kv->value[6]), sizeof(uint16_t));
         }
         off += sizeof(uint16_t) * 2;
         off += kv->length;
@@ -168,7 +203,7 @@ void _HighStateHandler(const void *message) {
     uint8_t buffer[1 + sizeof(data)];
     buffer[0] = MSG_HIGHSTATE;
     memcpy(buffer + 1, data, sizeof(data));
-    sendto(udp_socket, buffer, sizeof(buffer), 0, (sockaddr*)&target_addr, sizeof(target_addr));
+    SendToAllClients(buffer, sizeof(buffer));
 };
 
 int main(int argc, const char *argv[]) {
@@ -187,7 +222,7 @@ int main(int argc, const char *argv[]) {
         printf("Livox Init Success\n");
     }
 
-    InitUDPSender("192.168.0.229", 8888);
+    InitTCPServer(8888);
 
     // init go2
     unitree::robot::ChannelFactory::Instance()->Init(0, "eth0");
@@ -209,7 +244,8 @@ int main(int argc, const char *argv[]) {
     SetLivoxLidarInfoChangeCallback(LidarInfoChangeCallback, nullptr);
 
     while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        AcceptTCPClients();
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     LivoxLidarSdkUninit();
