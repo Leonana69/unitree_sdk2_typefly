@@ -29,6 +29,20 @@ std::atomic<bool> client_ready(false);
 sockaddr_in client_addr;
 socklen_t client_addr_len = sizeof(client_addr);
 
+void WaitForNextClient() {
+    client_ready.store(false);
+    std::thread([] {
+        uint8_t buf[1];
+        while (true) {
+            int n = recvfrom(udp_socket, buf, sizeof(buf), 0, (sockaddr*)&client_addr, &client_addr_len);
+            if (n > 0) {
+                client_ready.store(true);
+                break;  // Accept one client, then break
+            }
+        }
+    }).detach();
+}
+
 void InitUDPServer(uint16_t port) {
     udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
     if (udp_socket < 0) {
@@ -47,17 +61,7 @@ void InitUDPServer(uint16_t port) {
         return;
     }
 
-    // Start a listener thread to catch the first incoming client packet
-    std::thread([] {
-        uint8_t buf[1];
-        while (true) {
-            int n = recvfrom(udp_socket, buf, sizeof(buf), 0, (sockaddr*)&client_addr, &client_addr_len);
-            if (n > 0) {
-                client_ready.store(true);
-                break;  // Only accept one client
-            }
-        }
-    }).detach();
+    WaitForNextClient();
 }
 
 void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEthernetPacket* data, void* client_data) {
@@ -193,7 +197,10 @@ void _HighStateHandler(const void *message) {
     uint8_t buffer[1 + sizeof(data)];
     buffer[0] = MSG_HIGHSTATE;
     memcpy(buffer + 1, data, sizeof(data));
-    sendto(udp_socket, buffer, sizeof(buffer), 0, (sockaddr*)&client_addr, client_addr_len);
+    ssize_t sent = sendto(udp_socket, buffer, sizeof(buffer), 0, (sockaddr*)&client_addr, client_addr_len);
+    if (sent < 0) {
+        WaitForNextClient();
+    }
 };
 
 int main(int argc, const char *argv[]) {

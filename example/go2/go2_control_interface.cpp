@@ -176,20 +176,19 @@ public:
         // sport_client.FreeAvoid(true);
     };
 
+    // Add a cancellation flag
+    std::atomic<bool> cancel_flag{false};
+
+    void cancel() {
+        cancel_flag.store(true);
+    }
+
     void _HighStateHandler(const void *message) {
         high_state = *(unitree_go::msg::dds_::SportModeState_ *)message;
 
         // std::cout << "Position: " << high_state.position()[0] << ", " << high_state.position()[1] << ", " << high_state.position()[2] << std::endl;
         // std::cout << "IMU rpy: " << high_state.imu_state().rpy()[0] << ", " << high_state.imu_state().rpy()[1] << ", " << high_state.imu_state().rpy()[2] << std::endl;
     };
-
-    ExecutionResult look(float angle_rad) {
-        if (sport_client.Euler(0, angle_rad, 0) != 0) {
-            std::cerr << "Failed to send look command." << std::endl;
-            return {ExecutionStatus::ERROR, "Failed to send look command."};
-        }
-        return {ExecutionStatus::SUCCESS, ""};
-    }
 
     ExecutionResult stand_down() {
         if (sport_client.StandDown() != 0) {
@@ -208,6 +207,8 @@ public:
     }
 
     ExecutionResult rotate(double delta_rad, double timeout = 8.0) {
+        cancel_flag.store(false); // Reset cancel flag at start
+
         double initial_yaw = high_state.imu_state().rpy()[2];
         double yaw_target = initial_yaw + delta_rad;
     
@@ -217,6 +218,10 @@ public:
     
         double prev_yaw = initial_yaw;
         while (now < end_time) {
+            if (cancel_flag.load()) {
+                sport_client.Move(0, 0, 0); // Optionally stop robot
+                return {ExecutionStatus::ERROR, "Rotate cancelled"};
+            }
             now = std::chrono::system_clock::now();
     
             double yaw_current = high_state.imu_state().rpy()[2];
@@ -258,6 +263,7 @@ public:
     }
 
     ExecutionResult move(double dx, double dy, bool body_frame = true, double timeout = 1.0) {
+        cancel_flag.store(false); // Reset cancel flag at start
         // World frame coordinates
         double initial_x = high_state.position()[0];
         double initial_y = high_state.position()[1];
@@ -285,6 +291,10 @@ public:
         auto end_time = now + std::chrono::duration<double>(timeout);
     
         while (now < end_time) {
+            if (cancel_flag.load()) {
+                sport_client.Move(0, 0, 0); // Optionally stop robot
+                return {ExecutionStatus::ERROR, "Move cancelled"};
+            }
             now = std::chrono::system_clock::now();
     
             double current_x = high_state.position()[0];
@@ -391,10 +401,6 @@ int main(int argc, char **argv) {
             }},
             {"stand_up", [body, &rc]() { return rc.stand_up(); }},
             {"stand_down", [body, &rc]() { return rc.stand_down(); }},
-            {"look", [body, &rc]() {
-                double angle_rad = body["angle_rad"].d();
-                return rc.look(angle_rad);
-            }},
             {"nav", [body, &rc]() {
                 double vx = body["vx"].d();
                 double vy = body["vy"].d();
@@ -406,6 +412,10 @@ int main(int argc, char **argv) {
                 float pitch = body["pitch"].d();
                 float yaw = body["yaw"].d();
                 return rc.euler(roll, pitch, yaw);
+            }},
+            {"stop", [&rc]() {
+                rc.cancel();
+                return ExecutionResult{ExecutionStatus::SUCCESS, "Cancelled current action"};
             }}
         };
     
