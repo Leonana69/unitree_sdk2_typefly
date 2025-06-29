@@ -25,14 +25,39 @@ enum MessageType : uint8_t {
 };
 
 int udp_socket;
-sockaddr_in target_addr;
+std::atomic<bool> client_ready(false);
+sockaddr_in client_addr;
+socklen_t client_addr_len = sizeof(client_addr);
 
-void InitUDPSender(const char* ip, uint16_t port) {
+void InitUDPServer(uint16_t port) {
     udp_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    memset(&target_addr, 0, sizeof(target_addr));
-    target_addr.sin_family = AF_INET;
-    target_addr.sin_port = htons(port);
-    inet_pton(AF_INET, ip, &target_addr.sin_addr);
+    if (udp_socket < 0) {
+        perror("socket creation failed");
+        return;
+    }
+
+    sockaddr_in server_addr{};
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(port);
+
+    if (bind(udp_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        perror("bind failed");
+        close(udp_socket);
+        return;
+    }
+
+    // Start a listener thread to catch the first incoming client packet
+    std::thread([] {
+        uint8_t buf[1];
+        while (true) {
+            int n = recvfrom(udp_socket, buf, sizeof(buf), 0, (sockaddr*)&client_addr, &client_addr_len);
+            if (n > 0) {
+                client_ready.store(true);
+                break;  // Only accept one client
+            }
+        }
+    }).detach();
 }
 
 void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEthernetPacket* data, void* client_data) {
@@ -52,7 +77,7 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
         int16_t z = (int16_t)(pts[i].z);
         if (z > -100 && z < 100) {
             if (offset + 6 > MAX_UDP_PAYLOAD) {
-                sendto(udp_socket, packet, offset, 0, (sockaddr*)&target_addr, sizeof(target_addr));
+                sendto(udp_socket, packet, offset, 0, (sockaddr*)&client_addr, client_addr_len);
                 seq_id++;
                 offset = 1 + sizeof(seq_id);
                 memcpy(&packet[1], &seq_id, sizeof(seq_id));
@@ -65,7 +90,7 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
     }
 
     if (offset > 1 + sizeof(seq_id)) {
-        sendto(udp_socket, packet, offset, 0, (sockaddr*)&target_addr, sizeof(target_addr));
+        sendto(udp_socket, packet, offset, 0, (sockaddr*)&client_addr, client_addr_len);
         seq_id++;
     }
 }
@@ -168,7 +193,7 @@ void _HighStateHandler(const void *message) {
     uint8_t buffer[1 + sizeof(data)];
     buffer[0] = MSG_HIGHSTATE;
     memcpy(buffer + 1, data, sizeof(data));
-    sendto(udp_socket, buffer, sizeof(buffer), 0, (sockaddr*)&target_addr, sizeof(target_addr));
+    sendto(udp_socket, buffer, sizeof(buffer), 0, (sockaddr*)&client_addr, client_addr_len);
 };
 
 int main(int argc, const char *argv[]) {
@@ -187,7 +212,7 @@ int main(int argc, const char *argv[]) {
         printf("Livox Init Success\n");
     }
 
-    InitUDPSender("192.168.0.104", 8888);
+    InitUDPServer(8888);
 
     // init go2
     unitree::robot::ChannelFactory::Instance()->Init(0, "eth0");
