@@ -35,6 +35,8 @@ void WaitForNextClient() {
         uint8_t buf[1];
         while (true) {
             int n = recvfrom(udp_socket, buf, sizeof(buf), 0, (sockaddr*)&client_addr, &client_addr_len);
+            printf("Received data from client %s:%d\n",
+                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
             if (n > 0) {
                 client_ready.store(true);
                 break;  // Accept one client, then break

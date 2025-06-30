@@ -183,6 +183,14 @@ public:
         cancel_flag.store(true);
     }
 
+    ExecutionResult stop() {
+        if (sport_client.StopMove() != 0) {
+            std::cerr << "Failed to send stop command." << std::endl;
+            return {ExecutionStatus::ERROR, "Failed to send stop command."};
+        }
+        return {ExecutionStatus::SUCCESS, ""};
+    }
+
     void _HighStateHandler(const void *message) {
         high_state = *(unitree_go::msg::dds_::SportModeState_ *)message;
 
@@ -414,8 +422,7 @@ int main(int argc, char **argv) {
                 return rc.euler(roll, pitch, yaw);
             }},
             {"stop", [&rc]() {
-                rc.cancel();
-                return ExecutionResult{ExecutionStatus::SUCCESS, "Cancelled current action"};
+                return rc.stop();
             }}
         };
     
