@@ -30,16 +30,25 @@ sockaddr_in client_addr;
 socklen_t client_addr_len = sizeof(client_addr);
 
 void WaitForNextClient() {
-    client_ready.store(false);
     std::thread([] {
         uint8_t buf[1];
+        sockaddr_in latest_client;
+        socklen_t latest_client_len = sizeof(latest_client);
+
         while (true) {
-            int n = recvfrom(udp_socket, buf, sizeof(buf), 0, (sockaddr*)&client_addr, &client_addr_len);
-            printf("Received data from client %s:%d\n",
-                   inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            int n = recvfrom(udp_socket, buf, sizeof(buf), 0,
+                             (sockaddr*)&latest_client, &latest_client_len);
             if (n > 0) {
-                client_ready.store(true);
-                break;  // Accept one client, then break
+                // Update the global client address atomically
+                std::memcpy(&client_addr, &latest_client, sizeof(sockaddr_in));
+                client_addr_len = latest_client_len;
+                if (!client_ready.exchange(true)) {
+                    printf("[UDP] First client connected from %s:%d\n",
+                           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                } else {
+                    printf("[UDP] Switched to new client %s:%d\n",
+                           inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                }
             }
         }
     }).detach();
@@ -66,6 +75,12 @@ void InitUDPServer(uint16_t port) {
     WaitForNextClient();
 }
 
+void sendtoClient(const uint8_t* data, size_t len) {
+    if (client_ready.load()) {
+        sendto(udp_socket, data, len, 0, (sockaddr*)&client_addr, client_addr_len);
+    }
+}
+
 void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEthernetPacket* data, void* client_data) {
     if (!data || data->data_type != kLivoxLidarCartesianCoordinateHighData) return;
     LivoxLidarCartesianHighRawPoint* pts = (LivoxLidarCartesianHighRawPoint*)data->data;
@@ -83,7 +98,7 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
         int16_t z = (int16_t)(pts[i].z);
         if (z > -100 && z < 100) {
             if (offset + 6 > MAX_UDP_PAYLOAD) {
-                sendto(udp_socket, packet, offset, 0, (sockaddr*)&client_addr, client_addr_len);
+                sendtoClient(packet, offset);
                 seq_id++;
                 offset = 1 + sizeof(seq_id);
                 memcpy(&packet[1], &seq_id, sizeof(seq_id));
@@ -96,7 +111,7 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
     }
 
     if (offset > 1 + sizeof(seq_id)) {
-        sendto(udp_socket, packet, offset, 0, (sockaddr*)&client_addr, client_addr_len);
+        sendtoClient(packet, offset);
         seq_id++;
     }
 }
@@ -177,7 +192,7 @@ void _HighStateHandler(const void *message) {
     static auto last_send_time = steady_clock::now();
     auto now = steady_clock::now();
     if (duration_cast<milliseconds>(now - last_send_time).count() < 20) {
-        return;  // Skip if less than 10ms since last send
+        return;  // Skip if less than 20ms since last send
     }
     last_send_time = now;
 
@@ -199,10 +214,7 @@ void _HighStateHandler(const void *message) {
     uint8_t buffer[1 + sizeof(data)];
     buffer[0] = MSG_HIGHSTATE;
     memcpy(buffer + 1, data, sizeof(data));
-    ssize_t sent = sendto(udp_socket, buffer, sizeof(buffer), 0, (sockaddr*)&client_addr, client_addr_len);
-    if (sent < 0) {
-        WaitForNextClient();
-    }
+    sendtoClient(buffer, sizeof(buffer));
 };
 
 int main(int argc, const char *argv[]) {
