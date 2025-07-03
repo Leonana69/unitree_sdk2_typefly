@@ -45,32 +45,23 @@ Note that if you install the library to other places other than `/opt/unitree_ro
 For more reference information, please go to [Unitree Document Center](https://support.unitree.com/home/zh/developer).
 
 
-## Support for D435i Stream
-On the Go2, install these libraries:
+## Start System Service
+Create the following file:
 ```
-apt install libudev-dev libusb-1.0-0-dev cmake
-```
-Clone the realsense lib:
-```
-git clone https://github.com/IntelRealSense/librealsense.git
-cd librealsense
-# select a version
-git checkout v2.56.3
+touch /etc/systemd/system/mystartup.service
 ```
 
-Make a minimum build:
+Paste this content, you may need to change the `ExecStart` based on the location of this repo on the dog.
 ```
-mkdir build && cd build
+[Unit]
+Description=Run gstreamer forwarding
+After=network.target
 
-cmake .. \
-  -DBUILD_EXAMPLES=OFF \
-  -DBUILD_GRAPHICAL_EXAMPLES=OFF \
-  -DBUILD_TOOLS=OFF \
-  -DBUILD_UNIT_TESTS=OFF \
-  -DFORCE_RSUSB_BACKEND=ON \
-  -DBUILD_WITH_CUDA=OFF \
-  -DBUILD_WITH_OPENMP=OFF \
-  -DCMAKE_BUILD_TYPE=Release
+[Service]
+ExecStart=/root/unitree_sdk2_typefly/scripts/run.sh
+Restart=on-failure
+User=root
 
-make && make install
+[Install]
+WantedBy=multi-user.target
 ```
