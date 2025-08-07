@@ -19,11 +19,6 @@
 using namespace unitree::common;
 using namespace unitree::robot;
 
-enum MessageType : uint8_t {
-    MSG_POINTCLOUD = 1,
-    MSG_HIGHSTATE  = 2
-};
-
 int udp_socket;
 std::atomic<bool> client_ready(false);
 sockaddr_in client_addr;
@@ -88,9 +83,8 @@ void PointCloudCallback(uint32_t handle, const uint8_t dev_type, LivoxLidarEther
     static thread_local uint16_t seq_id = 0;
     constexpr size_t MAX_UDP_PAYLOAD = 512;
     uint8_t packet[MAX_UDP_PAYLOAD];
-    packet[0] = MSG_POINTCLOUD;
-    memcpy(&packet[1], &seq_id, sizeof(seq_id));
-    size_t offset = 1 + sizeof(seq_id);
+    memcpy(&packet[0], &seq_id, sizeof(seq_id));
+    size_t offset = sizeof(seq_id);
 
     for (uint32_t i = 0; i < data->dot_num; ++i) {
         int16_t x = (int16_t)(pts[i].x);
@@ -187,35 +181,35 @@ void LidarInfoChangeCallback(const uint32_t handle, const LivoxLidarInfo* info, 
     // SetLivoxLidarLidarIp(handle, &lidar_ip_info, SetIpInfoCallback, nullptr);
 }
 
-void _HighStateHandler(const void *message) {
-    using namespace std::chrono;
-    static auto last_send_time = steady_clock::now();
-    auto now = steady_clock::now();
-    if (duration_cast<milliseconds>(now - last_send_time).count() < 20) {
-        return;  // Skip if less than 20ms since last send
-    }
-    last_send_time = now;
+// void _HighStateHandler(const void *message) {
+//     using namespace std::chrono;
+//     static auto last_send_time = steady_clock::now();
+//     auto now = steady_clock::now();
+//     if (duration_cast<milliseconds>(now - last_send_time).count() < 20) {
+//         return;  // Skip if less than 20ms since last send
+//     }
+//     last_send_time = now;
 
-    const auto* high_state = static_cast<const unitree_go::msg::dds_::SportModeState_*>(message);
+//     const auto* high_state = static_cast<const unitree_go::msg::dds_::SportModeState_*>(message);
 
-    float data[7];
-    data[0] = high_state->position()[0];
-    data[1] = high_state->position()[1];
-    data[2] = high_state->position()[2];
-    data[3] = high_state->imu_state().quaternion()[0];
-    data[4] = high_state->imu_state().quaternion()[1];
-    data[5] = high_state->imu_state().quaternion()[2];
-    data[6] = high_state->imu_state().quaternion()[3];
+//     float data[7];
+//     data[0] = high_state->position()[0];
+//     data[1] = high_state->position()[1];
+//     data[2] = high_state->position()[2];
+//     data[3] = high_state->imu_state().quaternion()[0];
+//     data[4] = high_state->imu_state().quaternion()[1];
+//     data[5] = high_state->imu_state().quaternion()[2];
+//     data[6] = high_state->imu_state().quaternion()[3];
 
-    // printf("Position: %f, %f, %f\n", data[0], data[1], data[2]);
-    // printf("IMU quaternion: %f, %f, %f, %f\n", data[3], data[4], data[5], data[6]);
+//     // printf("Position: %f, %f, %f\n", data[0], data[1], data[2]);
+//     // printf("IMU quaternion: %f, %f, %f, %f\n", data[3], data[4], data[5], data[6]);
 
-    // sendto(udp_socket, data, sizeof(data), 0, (sockaddr*)&target_addr, sizeof(target_addr));
-    uint8_t buffer[1 + sizeof(data)];
-    buffer[0] = MSG_HIGHSTATE;
-    memcpy(buffer + 1, data, sizeof(data));
-    sendtoClient(buffer, sizeof(buffer));
-};
+//     // sendto(udp_socket, data, sizeof(data), 0, (sockaddr*)&target_addr, sizeof(target_addr));
+//     uint8_t buffer[1 + sizeof(data)];
+//     buffer[0] = MSG_HIGHSTATE;
+//     memcpy(buffer + 1, data, sizeof(data));
+//     sendtoClient(buffer, sizeof(buffer));
+// };
 
 int main(int argc, const char *argv[]) {
     if (argc != 2) {
@@ -234,13 +228,6 @@ int main(int argc, const char *argv[]) {
     }
 
     InitUDPServer(8888);
-
-    // init go2
-    unitree::robot::ChannelFactory::Instance()->Init(0, "eth0");
-    unitree_go::msg::dds_::SportModeState_ high_state{}; // default init
-    unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::SportModeState_> suber;
-    suber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_HIGHSTATE));
-    suber->InitChannel(&_HighStateHandler, 1);
     
     // REQUIRED, to get point cloud data via 'PointCloudCallback'
     SetLivoxLidarPointCloudCallBack(PointCloudCallback, nullptr);

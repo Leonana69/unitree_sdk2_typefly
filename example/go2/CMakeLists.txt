@@ -10,6 +10,8 @@
 # add_executable(go2_stand_example go2_stand_example.cpp)
 # target_link_libraries(go2_stand_example unitree_sdk2)
 
+# add_executable(go2_dashboard go2_dashboard.cpp)
+# target_link_libraries(go2_dashboard unitree_sdk2)
 
 # add_executable(go2_robot_state_client go2_robot_state_client.cpp)
 # target_link_libraries(go2_robot_state_client unitree_sdk2)
@@ -19,17 +21,19 @@
 
 # add_executable(go2_vui_client go2_vui_client.cpp)
 # target_link_libraries(go2_vui_client unitree_sdk2)
-
 add_executable(go2_control_interface go2_control_interface.cpp)
 target_link_libraries(go2_control_interface unitree_sdk2)
 
-add_executable(go2_livox go2_livox.cpp)
+add_executable(go2_high_state_service go2_high_state_service.cpp)
+target_link_libraries(go2_high_state_service unitree_sdk2)
+
+add_executable(go2_livox_service go2_livox_service.cpp)
 
 # Include Livox SDK headers
-target_include_directories(go2_livox PRIVATE /usr/local/include)
+target_include_directories(go2_livox_service PRIVATE /usr/local/include)
 
 # Link against Livox SDK shared library and the Unitree SDK
-target_link_libraries(go2_livox 
-    unitree_sdk2 
+target_link_libraries(go2_livox_service
+    unitree_sdk2
     /usr/local/lib/liblivox_lidar_sdk_shared.so
 )
