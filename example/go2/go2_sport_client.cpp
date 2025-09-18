@@ -37,7 +37,7 @@ enum test_mode
   stop_move = 99
 };
 
-const int TEST_MODE = stand_down;
+const int TEST_MODE = stretch;
 
 class Custom
 {
@@ -238,13 +238,8 @@ public:
 
 int main(int argc, char **argv)
 {
-  if (argc < 2)
-  {
-    std::cout << "Usage: " << argv[0] << " networkInterface" << std::endl;
-    exit(-1);
-  }
-
-  unitree::robot::ChannelFactory::Instance()->Init(0, argv[1]);
+  std::string interface = "eth0";
+  unitree::robot::ChannelFactory::Instance()->Init(0, interface);
   Custom custom;
 
   sleep(1); // Wait for 1 second to obtain a stable state

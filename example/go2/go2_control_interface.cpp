@@ -270,6 +270,14 @@ public:
         return {ExecutionStatus::SUCCESS, ""};
     }
 
+    ExecutionResult stretch() {
+        if (sport_client.Stretch() != 0) {
+            std::cerr << "Failed to send stretch command." << std::endl;
+            return {ExecutionStatus::ERROR, "Failed to send stretch command."};
+        }
+        return {ExecutionStatus::SUCCESS, ""};
+    }
+
     ExecutionResult move(double dx, double dy, bool body_frame = true, double timeout = 1.0) {
         cancel_flag.store(false); // Reset cancel flag at start
         // World frame coordinates
@@ -423,6 +431,9 @@ int main(int argc, char **argv) {
             }},
             {"stop", [&rc]() {
                 return rc.stop();
+            }},
+            {"stretch", [&rc]() {
+                return rc.stretch();
             }}
         };
     
