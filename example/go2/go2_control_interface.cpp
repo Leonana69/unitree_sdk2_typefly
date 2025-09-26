@@ -209,7 +209,15 @@ public:
     ExecutionResult stand_up() {
         if (sport_client.RecoveryStand() != 0) {
             std::cerr << "Failed to send stand up command." << std::endl;
-            return {ExecutionStatus::ERROR, "Failed to send stand up command."};
+            return {ExecutionStatus::ERROR, "Failed recovery."};
+        }
+        return {ExecutionStatus::SUCCESS, ""};
+    }
+
+    ExecutionResult balanced_stand() {
+        if (sport_client.BalanceStand() != 0) {
+            std::cerr << "Failed to send balanced stand command." << std::endl;
+            return {ExecutionStatus::ERROR, "Failed to send balanced stand command."};
         }
         return {ExecutionStatus::SUCCESS, ""};
     }
@@ -363,7 +371,7 @@ public:
     unitree_go::msg::dds_::LowCmd_ low_cmd{};      // default init
     unitree_go::msg::dds_::LowState_ low_state{};  // default init
 
-    unitree::robot::b2::MotionSwitcherClient msc;
+    // unitree::robot::b2::MotionSwitcherClient msc;
     /*publisher*/
     ChannelPublisherPtr<unitree_go::msg::dds_::LowCmd_> lowcmd_publisher;
     /*subscriber*/
@@ -434,7 +442,10 @@ int main(int argc, char **argv) {
             }},
             {"stretch", [&rc]() {
                 return rc.stretch();
-            }}
+            }},
+            {"balanced_stand", [&rc]() {
+                return rc.balanced_stand();
+            }},
         };
     
         // Execute the corresponding handler
