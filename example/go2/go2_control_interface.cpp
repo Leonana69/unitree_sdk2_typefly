@@ -160,18 +160,18 @@ public:
         suber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::SportModeState_>(TOPIC_HIGHSTATE));
         suber->InitChannel(std::bind(&Go2RemoteControl::_HighStateHandler, this, std::placeholders::_1), 1);
 
-        msc.SetTimeout(10.0f); 
-        msc.Init();
+        // msc.SetTimeout(10.0f); 
+        // msc.Init();
 
-        uint32_t ret = msc.SelectMode("normal");
-        std::string form, name;
-        msc.CheckMode(form, name);
-        if (ret == 0) {
-            std::cout << "SelectMode succeeded." << std::endl;
-        } else {
-            std::cout << "SelectMode failed. Error code: " << ret << std::endl;
-        }
-        std::cout << "Current mode: " << name << std::endl;
+        // uint32_t ret = msc.SelectMode("normal");
+        // std::string form, name;
+        // msc.CheckMode(form, name);
+        // if (ret == 0) {
+        //     std::cout << "SelectMode succeeded." << std::endl;
+        // } else {
+        //     std::cout << "SelectMode failed. Error code: " << ret << std::endl;
+        // }
+        // std::cout << "Current mode: " << name << std::endl;
 
         // sport_client.FreeAvoid(true);
     };
