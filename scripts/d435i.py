@@ -6,6 +6,7 @@ gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 Gst.init(None)
 HOST = "230.1.1.1"
+FRAME_RATE = 30
 
 """
 gst-launch-1.0 \
@@ -19,7 +20,7 @@ def gst_pipeline(port):
     return (
         f"appsrc name=appsrc is-live=true block=true format=TIME ! "
         "videoconvert ! "
-        "video/x-raw,format=NV12,width=640,height=480,framerate=30/1 ! "
+        f"video/x-raw,format=NV12,width=640,height=480,framerate={FRAME_RATE}/1 ! "
         "mpph264enc bps=300000 header-mode=1 ! "
         "rtph264pay ! "
         f"udpsink host={HOST} port={port} auto-multicast=true multicast-iface=wlan0 sync=false"
@@ -33,7 +34,7 @@ def create_gst_app(port, width, height):
     appsrc.set_property("format", Gst.Format.TIME)
     appsrc.set_property("caps",
         Gst.Caps.from_string(
-            f"video/x-raw,format=BGR,width={width},height={height},framerate=30/1"
+            f"video/x-raw,format=BGR,width={width},height={height},framerate={FRAME_RATE}/1"
         )
     )
     pipeline.set_state(Gst.State.PLAYING)
@@ -43,8 +44,8 @@ def stream_realsense():
     # ==== Initialize RealSense ====
     pipeline = rs.pipeline()
     config = rs.config()
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, FRAME_RATE)
+    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, FRAME_RATE)
     profile = pipeline.start(config)
     print("Started RealSense streaming...")
 
@@ -66,10 +67,13 @@ def stream_realsense():
             color_image = np.asanyarray(color_frame.get_data())
             depth_image = np.asanyarray(depth_frame.get_data())
 
-            # --- Encode depth as RG (16-bit split) ---
-            depth_high = (depth_image >> 8).astype(np.uint8)
-            depth_low = (depth_image & 0xFF).astype(np.uint8)
-            depth_rgb = np.stack((depth_high, depth_low, np.zeros_like(depth_high)), axis=-1)
+            # Normalize depth for visualization
+            depth_vis = cv2.applyColorMap(
+                cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
+            )
+            # cap 6375 mm ~ 25 * 255
+            depth_normalized = np.clip(depth_image / 25, 0, 255).astype(np.uint8)
+            depth_gray_bgr = cv2.cvtColor(depth_normalized, cv2.COLOR_GRAY2BGR)
 
             # --- Push COLOR frame ---
             color_bytes = color_image.tobytes()
@@ -77,16 +81,22 @@ def stream_realsense():
             buf.fill(0, color_bytes)
             timestamp = Gst.util_uint64_scale(GLib.get_monotonic_time(), Gst.SECOND, 1000000)
             buf.pts = buf.dts = timestamp
-            buf.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, 30)
+            buf.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, FRAME_RATE)
             color_src.emit("push-buffer", buf)
 
             # --- Push DEPTH frame ---
-            depth_bytes = depth_rgb.tobytes()
+            depth_bytes = depth_gray_bgr.tobytes()
             buf2 = Gst.Buffer.new_allocate(None, len(depth_bytes), None)
             buf2.fill(0, depth_bytes)
             buf2.pts = buf2.dts = timestamp
-            buf2.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, 30)
+            buf2.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, FRAME_RATE)
             depth_src.emit("push-buffer", buf2)
+
+            # Optional: preview locally
+            # cv2.imshow("Color", color_image)
+            # cv2.imshow("Depth", depth_vis)
+            # if cv2.waitKey(1) & 0xFF == ord('q'):
+            #     break
 
     finally:
         pipeline.stop()
