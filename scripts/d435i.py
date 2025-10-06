@@ -66,10 +66,10 @@ def stream_realsense():
             color_image = np.asanyarray(color_frame.get_data())
             depth_image = np.asanyarray(depth_frame.get_data())
 
-            # Normalize depth for visualization
-            depth_vis = cv2.applyColorMap(
-                cv2.convertScaleAbs(depth_image, alpha=0.03), cv2.COLORMAP_JET
-            )
+            # --- Encode depth as RG (16-bit split) ---
+            depth_high = (depth_image >> 8).astype(np.uint8)
+            depth_low = (depth_image & 0xFF).astype(np.uint8)
+            depth_rgb = np.stack((depth_high, depth_low, np.zeros_like(depth_high)), axis=-1)
 
             # --- Push COLOR frame ---
             color_bytes = color_image.tobytes()
@@ -81,18 +81,12 @@ def stream_realsense():
             color_src.emit("push-buffer", buf)
 
             # --- Push DEPTH frame ---
-            depth_bytes = depth_vis.tobytes()
+            depth_bytes = depth_rgb.tobytes()
             buf2 = Gst.Buffer.new_allocate(None, len(depth_bytes), None)
             buf2.fill(0, depth_bytes)
             buf2.pts = buf2.dts = timestamp
             buf2.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, 30)
             depth_src.emit("push-buffer", buf2)
-
-            # Optional: preview locally
-            # cv2.imshow("Color", color_image)
-            # cv2.imshow("Depth", depth_vis)
-            # if cv2.waitKey(1) & 0xFF == ord('q'):
-            #     break
 
     finally:
         pipeline.stop()

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-/root/unitree_sdk2_typefly/scripts/video_forward.sh &
+# /root/unitree_sdk2_typefly/scripts/video_forward.sh &
+# python3 /root/unitree_sdk2_typefly/scripts/d435i.py &
 /root/unitree_sdk2_typefly/scripts/livox_service.sh &
 /root/unitree_sdk2_typefly/scripts/control_interface.sh &
 /root/unitree_sdk2_typefly/scripts/audio_forward.sh &
