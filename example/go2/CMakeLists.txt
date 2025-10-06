@@ -27,6 +27,9 @@ target_link_libraries(go2_control_interface unitree_sdk2)
 add_executable(go2_high_state_service go2_high_state_service.cpp)
 target_link_libraries(go2_high_state_service unitree_sdk2)
 
+add_executable(go2_lidar_service go2_lidar_service.cpp)
+target_link_libraries(go2_lidar_service unitree_sdk2)
+
 add_executable(go2_livox_service go2_livox_service.cpp)
 
 # Include Livox SDK headers

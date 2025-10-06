@@ -173,12 +173,6 @@ void LidarInfoChangeCallback(const uint32_t handle, const LivoxLidarInfo* info, 
     SetLivoxLidarWorkMode(handle, kLivoxLidarNormal, WorkModeCallback, nullptr);
   
     QueryLivoxLidarInternalInfo(handle, QueryInternalInfoCallback, nullptr);
-  
-    // LivoxLidarIpInfo lidar_ip_info;
-    // strcpy(lidar_ip_info.ip_addr, "192.168.1.10");
-    // strcpy(lidar_ip_info.net_mask, "255.255.255.0");
-    // strcpy(lidar_ip_info.gw_addr, "192.168.1.1");
-    // SetLivoxLidarLidarIp(handle, &lidar_ip_info, SetIpInfoCallback, nullptr);
 }
 
 // void _HighStateHandler(const void *message) {
