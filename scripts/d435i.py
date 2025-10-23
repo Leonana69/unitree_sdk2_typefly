@@ -3,11 +3,13 @@ import numpy as np
 import cv2
 import gi
 import time
+from collections import deque
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 Gst.init(None)
 HOST = "230.1.1.1"
-FRAME_RATE = 15
+PUBLISH_RATE = 15
+FRAME_RATE = 30
 
 # ==== CAMERA SETTINGS ====
 USE_MASTER_CAMERA_SETTINGS = True  # Use first camera's auto settings for all
@@ -18,7 +20,7 @@ def gst_pipeline(port, height):
     return (
         f"appsrc name=appsrc is-live=true block=true format=TIME ! "
         "videoconvert ! "
-        f"video/x-raw,format=NV12,width=640,height={height},framerate={FRAME_RATE}/1 ! "
+        f"video/x-raw,format=NV12,width=640,height={height},framerate={PUBLISH_RATE}/1 ! "
         f"mpph264enc bps={300000 * (height // 480)} header-mode=1 ! "
         "rtph264pay ! "
         f"udpsink host={HOST} port={port} auto-multicast=true multicast-iface=wlan0 sync=false"
@@ -32,7 +34,7 @@ def create_gst_app(port, width, height):
     appsrc.set_property("format", Gst.Format.TIME)
     appsrc.set_property("caps",
         Gst.Caps.from_string(
-            f"video/x-raw,format=BGR,width={width},height={height},framerate={FRAME_RATE}/1"
+            f"video/x-raw,format=BGR,width={width},height={height},framerate={PUBLISH_RATE}/1"
         )
     )
     pipeline.set_state(Gst.State.PLAYING)
@@ -154,6 +156,8 @@ def stream_realsense():
         print(f"  ├─ Exposure: {master_settings['exposure']:.1f} μs")
         print(f"  ├─ Gain: {master_settings['gain']:.1f}")
         print(f"  └─ White Balance: {master_settings['white_balance']:.0f} K")
+
+        master_settings['white_balance'] = 6400.0
         
         # Apply master settings to all cameras (including master)
         print(f"\n🔄 Applying settings to all cameras...")
@@ -168,27 +172,68 @@ def stream_realsense():
     depth_pipe, depth_src = create_gst_app(port=1723, width=output_width, height=output_height)
     print(f"✓ GStreamer pipelines ready: {output_width}x{output_height} on ports 1722 (color) and 1723 (depth)")
 
+    align_to = rs.stream.color
+    align = rs.align(align_to)
+    hole_filling = rs.hole_filling_filter()
+
+    frame_buffers = [deque(maxlen=10), deque(maxlen=10)]
+    max_time_diff_ms = 40  # ~1 frame at 30fps
+    frame_count = 0
+
     try:
         while True:
-            color_images = []
-            depth_images = []
+            # Collect frames from both cameras into buffers
+            for i, pipeline in enumerate(pipelines):
+                try:
+                    frames = pipeline.poll_for_frames()
+                    if frames:
+                        frame_buffers[i].append(frames)
+                except:
+                    pass
+
+            best_match = []
+            best_time_diff = float('inf')
+            if num_cameras > 1:
+                for frames0 in frame_buffers[0]:
+                    for frames1 in frame_buffers[1]:
+                        time_diff = abs(frames0.get_timestamp() - frames1.get_timestamp())
+                        if time_diff < best_time_diff:
+                            best_time_diff = time_diff
+                            best_match = [frames0, frames1]
+            else:
+                best_match.append(frame_buffers[0][-1])
+                best_time_diff = 0
+
+            if best_match and best_time_diff < max_time_diff_ms:
+                frame_count += 1
+
+                color_images = []
+                depth_images = []
             
-            # Get frames from all cameras
-            all_frames_valid = True
-            for pipeline in pipelines:
-                frames = pipeline.wait_for_frames()
-                color_frame = frames.get_color_frame()
-                depth_frame = frames.get_depth_frame()
+                # Get frames from all cameras
+                all_frames_valid = True
+                for i, frames in enumerate(best_match):
+                    aligned_frames = align.process(frames)
+                    color_frame = aligned_frames.get_color_frame()
+                    depth_frame = aligned_frames.get_depth_frame()
+                    depth_frame = hole_filling.process(depth_frame)
+
+                    if frames in frame_buffers[i]:
+                        frame_buffers[i].remove(frames)
+                    
+                    if not color_frame or not depth_frame:
+                        all_frames_valid = False
+                        break
+
+                    # Convert to numpy arrays
+                    color_images.append(np.asanyarray(color_frame.get_data()))
+                    depth_images.append(np.asanyarray(depth_frame.get_data()))
+
                 
-                if not color_frame or not depth_frame:
-                    all_frames_valid = False
-                    break
                 
-                # Convert to numpy arrays
-                color_images.append(np.asanyarray(color_frame.get_data()))
-                depth_images.append(np.asanyarray(depth_frame.get_data()))
-            
-            if not all_frames_valid:
+                if not all_frames_valid:
+                    continue
+            else:
                 continue
 
             # Stack images if multiple cameras, otherwise use single image
@@ -213,7 +258,7 @@ def stream_realsense():
             buf.fill(0, color_bytes)
             timestamp = Gst.util_uint64_scale(GLib.get_monotonic_time(), Gst.SECOND, 1000000)
             buf.pts = buf.dts = timestamp
-            buf.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, FRAME_RATE)
+            buf.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, PUBLISH_RATE)
             color_src.emit("push-buffer", buf)
 
             # --- Push DEPTH frame ---
@@ -221,7 +266,7 @@ def stream_realsense():
             buf2 = Gst.Buffer.new_allocate(None, len(depth_bytes), None)
             buf2.fill(0, depth_bytes)
             buf2.pts = buf2.dts = timestamp
-            buf2.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, FRAME_RATE)
+            buf2.duration = Gst.util_uint64_scale_int(1, Gst.SECOND, PUBLISH_RATE)
             depth_src.emit("push-buffer", buf2)
 
             # Optional: preview locally
