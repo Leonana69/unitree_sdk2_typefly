@@ -84,7 +84,7 @@ void _HighStateHandler(const void *message) {
 
     const auto* high_state = static_cast<const unitree_go::msg::dds_::SportModeState_*>(message);
 
-    float data[7];
+    float data[13];
     data[0] = high_state->position()[0];
     data[1] = high_state->position()[1];
     data[2] = high_state->position()[2];
@@ -92,6 +92,12 @@ void _HighStateHandler(const void *message) {
     data[4] = high_state->imu_state().quaternion()[1];
     data[5] = high_state->imu_state().quaternion()[2];
     data[6] = high_state->imu_state().quaternion()[3];
+    data[7] = high_state->imu_state().accelerometer()[0];
+    data[8] = high_state->imu_state().accelerometer()[1];
+    data[9] = high_state->imu_state().accelerometer()[2];
+    data[10] = high_state->imu_state().gyroscope()[0];
+    data[11] = high_state->imu_state().gyroscope()[1];
+    data[12] = high_state->imu_state().gyroscope()[2];
 
     // printf("Position: %f, %f, %f\n", data[0], data[1], data[2]);
     // printf("IMU quaternion: %f, %f, %f, %f\n", data[3], data[4], data[5], data[6]);
