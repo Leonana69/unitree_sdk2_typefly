@@ -111,6 +111,15 @@ def enable_auto_exposure(pipeline):
     color_sensor.set_option(rs.option.enable_auto_exposure, 1)
     color_sensor.set_option(rs.option.enable_auto_white_balance, 1)
 
+def disable_auto_exposure(pipeline):
+    """Disable auto-exposure and auto white balance on a camera"""
+    profile = pipeline.get_active_profile()
+    device = profile.get_device()
+    color_sensor = device.first_color_sensor()
+    
+    color_sensor.set_option(rs.option.enable_auto_exposure, 0)
+    color_sensor.set_option(rs.option.enable_auto_white_balance, 0)
+
 def stream_realsense():
     # ==== Get available cameras ====
     serials = get_camera_serials()
@@ -139,33 +148,20 @@ def stream_realsense():
         print(f"✓ Started camera {i+1}: {serial}")
 
     # ==== Synchronize camera settings ====
-    if USE_MASTER_CAMERA_SETTINGS and num_cameras > 1:
-        print(f"\n⚙️  Calibrating master camera (camera 1)...")
-        master_pipeline = pipelines[0]
-        
-        # Enable auto-exposure on master camera
-        enable_auto_exposure(master_pipeline)
-        
-        # Let auto-exposure settle
-        print(f"  └─ Waiting {AUTO_CALIBRATION_FRAMES} frames for auto-exposure to stabilize...")
-        for _ in range(AUTO_CALIBRATION_FRAMES):
-            master_pipeline.wait_for_frames()
-            time.sleep(0.01)
-        
-        # Read settings from master camera
-        master_settings = get_camera_settings(master_pipeline)
-        print(f"\n📊 Master camera settings:")
-        print(f"  ├─ Exposure: {master_settings['exposure']:.1f} μs")
-        print(f"  ├─ Gain: {master_settings['gain']:.1f}")
-        print(f"  └─ White Balance: {master_settings['white_balance']:.0f} K")
-        
-        # Apply master settings to all cameras (including master)
-        print(f"\n🔄 Applying settings to all cameras...")
+    if num_cameras > 1:
+        FIXED_CAMERA_SETTINGS = {
+            "exposure": 1000.0,        # microseconds
+            "gain": 16.0,              # unitless
+            "white_balance": 4600.0    # Kelvin
+        }
+
+        print(f"\n⚙️  Applying fixed settings to all cameras...")
         for i, pipeline in enumerate(pipelines):
-            apply_camera_settings(pipeline, master_settings)
-            print(f"  ✓ Camera {i+1} synchronized")
-    
-    print(f"\n✓ All cameras configured and synchronized!")
+            disable_auto_exposure(pipeline)  # make sure auto-exposure is off
+            apply_camera_settings(pipeline, FIXED_CAMERA_SETTINGS)
+            print(f"  ✓ Camera {i+1} configured with fixed settings")
+
+        print(f"\n✓ All cameras configured with identical fixed settings!")
 
     # ==== Create GStreamer senders ====
     color_pipe, color_src = create_gst_app(port=1722, width=output_width, height=output_height)
