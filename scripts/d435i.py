@@ -11,6 +11,8 @@ HOST = "230.1.1.1"
 PUBLISH_RATE = 15
 FRAME_RATE = 30
 
+CUT_ROWS = 40
+
 # ==== CAMERA SETTINGS ====
 USE_MASTER_CAMERA_SETTINGS = True  # Use first camera's auto settings for all
 AUTO_CALIBRATION_FRAMES = 30  # Number of frames to let auto-exposure settle
@@ -21,7 +23,7 @@ def gst_pipeline(port, height):
         f"appsrc name=appsrc is-live=true block=true format=TIME ! "
         "videoconvert ! "
         f"video/x-raw,format=NV12,width=640,height={height},framerate={PUBLISH_RATE}/1 ! "
-        f"mpph264enc bps={300000 * (height // 480)} header-mode=1 ! "
+        f"mpph264enc bps={300000 * int(height / 480)} header-mode=1 ! "
         "rtph264pay ! "
         f"udpsink host={HOST} port={port} auto-multicast=true multicast-iface=wlan0 sync=false"
     )
@@ -122,7 +124,7 @@ def stream_realsense():
     
     # Calculate output dimensions
     output_width = 640
-    output_height = 480 * num_cameras
+    output_height = 480 * num_cameras - CUT_ROWS
     
     # ==== Initialize RealSense pipelines ====
     pipelines = []
@@ -156,8 +158,6 @@ def stream_realsense():
         print(f"  ├─ Exposure: {master_settings['exposure']:.1f} μs")
         print(f"  ├─ Gain: {master_settings['gain']:.1f}")
         print(f"  └─ White Balance: {master_settings['white_balance']:.0f} K")
-
-        master_settings['white_balance'] = 6400.0
         
         # Apply master settings to all cameras (including master)
         print(f"\n🔄 Applying settings to all cameras...")
@@ -238,11 +238,15 @@ def stream_realsense():
 
             # Stack images if multiple cameras, otherwise use single image
             if num_cameras > 1:
+                color_images[1] = color_images[1][CUT_ROWS:, :]
                 color_combined = np.vstack(color_images)
                 
                 # Normalize and stack depth images
                 depth_bgr_images = []
-                for depth_image in depth_images:
+                for i, depth_image in enumerate(depth_images):
+                    if i == 1:  # cut top CUT_ROWS rows for the second depth image too
+                        depth_image = depth_image[CUT_ROWS:, :]
+
                     depth_normalized = np.clip(depth_image / 25, 0, 255).astype(np.uint8)
                     depth_gray_bgr = cv2.cvtColor(depth_normalized, cv2.COLOR_GRAY2BGR)
                     depth_bgr_images.append(depth_gray_bgr)
