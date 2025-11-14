@@ -1,13 +1,18 @@
 import pyrealsense2 as rs
 import numpy as np
-import cv2
+import cv2, os
 import gi
 import time
 from collections import deque
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 Gst.init(None)
-HOST = "230.1.1.1"
+
+ROBOT_ID = os.getenv("ROBOT_ID", "1")
+GSTREAMER_RGB_PORT = os.getenv("GSTREAMER_RGB_PORT", "1722")
+GSTREAMER_DEPTH_PORT = os.getenv("GSTREAMER_DEPTH_PORT", "1723")
+
+HOST = f"230.1.1.{ROBOT_ID}"
 PUBLISH_RATE = 15
 FRAME_RATE = 30
 
@@ -164,9 +169,9 @@ def stream_realsense():
         print(f"\n✓ All cameras configured with identical fixed settings!")
 
     # ==== Create GStreamer senders ====
-    color_pipe, color_src = create_gst_app(port=1722, width=output_width, height=output_height)
-    depth_pipe, depth_src = create_gst_app(port=1723, width=output_width, height=output_height)
-    print(f"✓ GStreamer pipelines ready: {output_width}x{output_height} on ports 1722 (color) and 1723 (depth)")
+    color_pipe, color_src = create_gst_app(port=GSTREAMER_RGB_PORT, width=output_width, height=output_height)
+    depth_pipe, depth_src = create_gst_app(port=GSTREAMER_DEPTH_PORT, width=output_width, height=output_height)
+    print(f"✓ GStreamer pipelines ready: {output_width}x{output_height} on ports 1722 (color) and 1723 (depth), multicast to {HOST}")
 
     align_to = rs.stream.color
     align = rs.align(align_to)
