@@ -28,7 +28,7 @@ def gst_pipeline(port, height):
         f"appsrc name=appsrc is-live=true block=true format=TIME ! "
         "videoconvert ! "
         f"video/x-raw,format=NV12,width=640,height={height},framerate={PUBLISH_RATE}/1 ! "
-        f"mpph264enc bps={300000 * int(height / 480)} header-mode=1 ! "
+        f"mpph264enc bps={int(300000 * height / 480)} header-mode=1 ! "
         "rtph264pay ! "
         f"udpsink host={HOST} port={port} auto-multicast=true multicast-iface=wlan0 sync=false"
     )

@@ -1,4 +1,7 @@
 #!/bin/bash
 
+# Get directory of this script
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
 echo "Starting lidar service..."
-/root/unitree_sdk2_typefly/build/bin/go2_livox_service /root/unitree_sdk2_typefly/scripts/mid360_config.json &
+${SCRIPT_DIR}/../build/bin/typego_livox_service ${SCRIPT_DIR}/mid360_config.json &

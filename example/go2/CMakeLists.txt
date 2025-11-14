@@ -1,8 +1,8 @@
 # add_executable(go2_trajectory_follow go2_trajectory_follow.cpp)
 # target_link_libraries(go2_trajectory_follow unitree_sdk2)
 
-add_executable(go2_sport_client go2_sport_client.cpp)
-target_link_libraries(go2_sport_client unitree_sdk2)
+# add_executable(go2_sport_client go2_sport_client.cpp)
+# target_link_libraries(go2_sport_client unitree_sdk2)
 
 # add_executable(go2_low_level go2_low_level.cpp)
 # target_link_libraries(go2_low_level unitree_sdk2)
@@ -21,22 +21,27 @@ target_link_libraries(go2_sport_client unitree_sdk2)
 
 # add_executable(go2_vui_client go2_vui_client.cpp)
 # target_link_libraries(go2_vui_client unitree_sdk2)
-add_executable(go2_control_interface go2_control_interface.cpp)
-target_link_libraries(go2_control_interface unitree_sdk2)
+add_executable(typego_control_interface typego_control_interface.cpp)
+target_link_libraries(typego_control_interface unitree_sdk2)
 
-add_executable(go2_high_state_service go2_high_state_service.cpp)
-target_link_libraries(go2_high_state_service unitree_sdk2)
+add_executable(typego_high_state_service typego_high_state_service.cpp)
+target_link_libraries(typego_high_state_service unitree_sdk2)
 
-add_executable(go2_lidar_service go2_lidar_service.cpp)
-target_link_libraries(go2_lidar_service unitree_sdk2)
-
-add_executable(go2_livox_service go2_livox_service.cpp)
+add_executable(typego_livox_service typego_livox_service.cpp)
 
 # Include Livox SDK headers
-target_include_directories(go2_livox_service PRIVATE /usr/local/include)
+target_include_directories(typego_livox_service PRIVATE /usr/local/include)
 
 # Link against Livox SDK shared library and the Unitree SDK
-target_link_libraries(go2_livox_service
+target_link_libraries(typego_livox_service
     unitree_sdk2
     /usr/local/lib/liblivox_lidar_sdk_shared.so
+)
+
+# Install example executables
+install(TARGETS
+    typego_control_interface
+    typego_high_state_service
+    typego_livox_service
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )

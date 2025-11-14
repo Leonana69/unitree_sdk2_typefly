@@ -1,14 +1,24 @@
 #!/bin/bash
 
-set -a
-source .env
-set +a
+# Get directory of this script
+SCRIPT_DIR="$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-/root/unitree_sdk2_typefly/scripts/video_forward.sh &
-/root/unitree_sdk2_typefly/scripts/livox_service.sh &
-/root/unitree_sdk2_typefly/scripts/control_interface.sh &
-/root/unitree_sdk2_typefly/scripts/audio_forward.sh &
-/root/unitree_sdk2_typefly/scripts/high_state_service.sh &
+# Load .env if present
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+    set -a
+    source "${SCRIPT_DIR}/.env"
+    set +a
+else
+    echo "Warning: No .env file found in ${SCRIPT_DIR}"
+fi
 
+echo "Starting background services..."
+
+"${SCRIPT_DIR}/video_forward.sh" &
+"${SCRIPT_DIR}/livox_service.sh" &
+"${SCRIPT_DIR}/control_interface.sh" &
+"${SCRIPT_DIR}/audio_forward.sh" &
+"${SCRIPT_DIR}/high_state_service.sh" &
+
+echo "All services launched. Waiting for them to exit..."
 wait
-echo "All scripts are running in the background."
